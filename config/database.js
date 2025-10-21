@@ -9,27 +9,27 @@ const connectDB = async () => {
             socketTimeoutMS: 45000, // Chiudi socket dopo 45s di inattività
         });
 
-        console.log(`✅ MongoDB connesso: ${conn.connection.host}:${conn.connection.port}/${conn.connection.name}`);
+        console.log(`MongoDB connesso: ${conn.connection.host}:${conn.connection.port}/${conn.connection.name}`);
         
         // Event listeners per monitorare la connessione
         mongoose.connection.on('connected', () => {
-            console.log('🔗 Mongoose connesso a MongoDB');
+            console.log('Mongoose connesso a MongoDB');
         });
 
         mongoose.connection.on('error', (err) => {
-            console.error('❌ Errore connessione MongoDB:', err.message);
+            console.error('Errore connessione MongoDB:', err.message);
         });
 
         mongoose.connection.on('disconnected', () => {
-            console.log('🔌 Mongoose disconnesso da MongoDB');
+            console.log('Mongoose disconnesso da MongoDB');
         });
 
         // Gestione chiusura applicazione (rimossa per evitare chiusure inaspettate)
 
     } catch (error) {
-        console.error('❌ Errore connessione database:', error.message);
-        console.error('💡 Assicurati che MongoDB sia in esecuzione su localhost:27017');
-        console.error('💡 E che il database "Verifica" sia accessibile');
+        console.error('Errore connessione database:', error.message);
+        console.error('Assicurati che MongoDB sia in esecuzione su localhost:27017');
+        console.error('E che il database "Verifica" sia accessibile');
         process.exit(1);
     }
 };

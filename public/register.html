@@ -1,23 +1,25 @@
 <!DOCTYPE html>
-<html>
+<html lang="it">
 <head>
-    <title>Registrazione</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TMDb App - Registrazione</title>
 </head>
 <body>
-    <h1>Todo App - Registrazione</h1>
+    <h1>TMDb Film Manager - Registrazione</h1>
     
     <form id="registerForm">
         <div>
-            <label>Username:</label>
-            <input type="text" id="username" required>
+            <label for="username">Username:</label>
+            <input type="text" id="username" required title="Nome utente" placeholder="Inserisci username" aria-label="Username">
         </div>
         <div>
-            <label>Email:</label>
-            <input type="email" id="email" required>
+            <label for="email">Email:</label>
+            <input type="email" id="email" required title="Indirizzo email" placeholder="Inserisci email" aria-label="Email">
         </div>
         <div>
-            <label>Password:</label>
-            <input type="password" id="password" required>
+            <label for="password">Password:</label>
+            <input type="password" id="password" required title="Password" placeholder="Inserisci password" aria-label="Password">
         </div>
         <button type="submit">Registrati</button>
     </form>
@@ -47,7 +49,7 @@
                 if (data.success) {
                     localStorage.setItem('authToken', data.data.token);
                     localStorage.setItem('userData', JSON.stringify(data.data.user));
-                    window.location.href = '/app';
+                    window.location.href = '/app_tmdb';
                 } else {
                     message.textContent = data.message;
                 }

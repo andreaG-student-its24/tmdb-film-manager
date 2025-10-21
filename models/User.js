@@ -36,7 +36,15 @@ const userSchema = new mongoose.Schema({
     isActive: {
         type: Boolean,
         default: true
-    }
+    },
+    favoriteMedia: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Media'
+    }],
+    lists: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'List'
+    }]
 }, {
     timestamps: true // Aggiunge automaticamente createdAt e updatedAt
 });

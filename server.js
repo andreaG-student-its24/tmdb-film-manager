@@ -4,20 +4,23 @@ const cors = require('cors');
 const path = require('path');
 const session = require('express-session');
 const mongoose = require('mongoose');
+const axios = require('axios');
 
 // Import dei moduli personalizzati
 const User = require('./models/User');
-const Task = require('./models/Task');
+const Media = require('./models/Media');
+const List = require('./models/List');
 const { authenticateToken, generateToken } = require('./middleware/auth');
+const { searchMedia, getMovieDetails, getTVDetails } = require('./config/tmdb');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Connessione MongoDB semplificata
-mongoose.connect('mongodb://localhost:27017/Verifica')
-    .then(() => console.log('✅ MongoDB connesso'))
+// Connessione MongoDB
+mongoose.connect('mongodb://localhost:27017/TMDB')
+    .then(() => console.log(' MongoDB connesso'))
     .catch(err => {
-        console.error('❌ Errore MongoDB:', err);
+        console.error(' Errore MongoDB:', err);
         process.exit(1);
     });
 
@@ -60,9 +63,12 @@ app.get('/register', (req, res) => {
 });
 
 app.get('/app', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'app.html'));
+    res.sendFile(path.join(__dirname, 'public', 'app_tmdb.html'));
 });
 
+app.get('/app_tmdb', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'app_tmdb.html'));
+});
 
 
 // POST /api/auth/register - Registrazione utente
@@ -224,226 +230,745 @@ app.post('/api/auth/logout', (req, res) => {
     }
 });
 
+
+
 // GET /api/auth/me - Informazioni utente corrente
-app.get('/api/auth/me', authenticateToken, (req, res) => {
-    res.json({
-        success: true,
-        data: {
-            user: {
-                id: req.user._id,
-                username: req.user.username,
-                email: req.user.email,
-                createdAt: req.user.createdAt,
-                lastLogin: req.user.lastLogin
+app.get('/api/auth/me', authenticateToken, async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id).populate('lists');
+        
+        res.json({
+            success: true,
+            data: {
+                user: {
+                    id: user._id,
+                    username: user.username,
+                    email: user.email,
+                    lists: user.lists,
+                    createdAt: user.createdAt
+                }
             }
-        }
-    });
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Errore nel recupero dei dati utente'
+        });
+    }
 });
 
-// GET /api/tasks - Recupera le task dell'utente
-app.get('/api/tasks', authenticateToken, async (req, res) => {
+// ============================================
+// TMDB SEARCH ROUTES
+// ============================================
+
+// GET /api/tmdb/search - Ricerca film e serie
+app.get('/api/tmdb/search', async (req, res) => {
     try {
-        const { status, priority, sort } = req.query;
-        
-        // Costruisci il filtro
-        const filter = { userId: req.user._id };
-        
-        if (status && status !== 'all') {
-            filter.status = status;
-        }
-        
-        if (priority && priority !== 'all') {
-            filter.priority = priority;
+        const { query, type } = req.query;
+
+        if (!query || query.trim().length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'La query di ricerca è obbligatoria'
+            });
         }
 
-        // Costruisci l'ordinamento
-        let sortOptions = {};
-        switch (sort) {
-            case 'date-asc':
-                sortOptions.createdAt = 1;
-                break;
-            case 'date-desc':
-                sortOptions.createdAt = -1;
-                break;
-            case 'priority':
-                sortOptions.priority = -1;
-                break;
-            case 'title':
-                sortOptions.title = 1;
-                break;
-            default:
-                sortOptions.createdAt = -1;
-        }
-
-        const tasks = await Task.find(filter).sort(sortOptions);
+        const results = await searchMedia(query.trim(), type || 'all');
 
         res.json({
             success: true,
-            data: tasks
+            data: results
         });
 
     } catch (error) {
-        console.error('Errore recupero task:', error);
+        console.error('Errore ricerca TMDb:', error);
         res.status(500).json({
             success: false,
-            message: 'Errore nel recupero delle task'
+            message: 'Errore nella ricerca del contenuto'
         });
     }
 });
 
-// POST /api/tasks - Crea una nuova task
-app.post('/api/tasks', authenticateToken, async (req, res) => {
+// GET /api/tmdb/movie/:id - Dettagli film
+app.get('/api/tmdb/movie/:id', async (req, res) => {
     try {
-        const { title, description, priority, dueDate } = req.body;
+        const { id } = req.params;
 
-        if (!title || title.trim().length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Il titolo è obbligatorio'
-            });
-        }
+        const details = await getMovieDetails(id);
 
-        const task = new Task({
-            title: title.trim(),
-            description: description ? description.trim() : '',
-            priority: priority || 'medium',
-            dueDate: dueDate ? new Date(dueDate) : undefined,
-            userId: req.user._id
+        res.json({
+            success: true,
+            data: details
         });
 
-        await task.save();
+    } catch (error) {
+        console.error('Errore dettagli film:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Errore nel recupero dei dettagli del film'
+        });
+    }
+});
+
+// GET /api/tmdb/tv/:id - Dettagli serie TV
+app.get('/api/tmdb/tv/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const details = await getTVDetails(id);
+
+        res.json({
+            success: true,
+            data: details
+        });
+
+    } catch (error) {
+        console.error('Errore dettagli serie TV:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Errore nel recupero dei dettagli della serie TV'
+        });
+    }
+});
+
+// ============================================
+// MEDIA ROUTES (Salvataggio contenuti personali)
+// ============================================
+
+// POST /api/media - Salva un media nel database personale
+app.post('/api/media', authenticateToken, async (req, res) => {
+    try {
+        const { tmdbId, title, type, description, posterPath, releaseDate, rating, genres, cast, director, trailerUrl, runtime, numberOfSeasons } = req.body;
+
+        // Controlla se il media esiste già
+        let media = await Media.findOne({ tmdbId });
+
+        if (!media) {
+            media = new Media({
+                tmdbId,
+                title,
+                type,
+                description,
+                posterPath,
+                releaseDate,
+                rating,
+                genres: genres || [],
+                cast: cast || [],
+                director: director || [],
+                trailerUrl,
+                runtime,
+                numberOfSeasons
+            });
+
+            await media.save();
+        }
 
         res.status(201).json({
             success: true,
-            message: 'Task creata con successo',
-            data: task
+            message: 'Contenuto salvato con successo',
+            data: media
         });
 
     } catch (error) {
-        console.error('Errore creazione task:', error);
-
-        if (error.name === 'ValidationError') {
-            const errors = Object.values(error.errors).map(err => err.message);
-            return res.status(400).json({
-                success: false,
-                message: errors.join(', ')
-            });
-        }
-
+        console.error('Errore salvataggio media:', error);
         res.status(500).json({
             success: false,
-            message: 'Errore nella creazione della task'
+            message: 'Errore nel salvataggio del contenuto'
         });
     }
 });
 
-// PUT /api/tasks/:id - Aggiorna una task
-app.put('/api/tasks/:id', authenticateToken, async (req, res) => {
+// GET /api/media/:tmdbId - Ottieni dettagli media salvato
+app.get('/api/media/:tmdbId', async (req, res) => {
     try {
-        const { id } = req.params;
-        const updates = req.body;
+        const { tmdbId } = req.params;
 
-        // Verifica che la task appartenga all'utente
-        const task = await Task.findOne({ _id: id, userId: req.user._id });
-        
-        if (!task) {
+        const media = await Media.findOne({ tmdbId }).populate('reviews.userId', 'username');
+
+        if (!media) {
             return res.status(404).json({
                 success: false,
-                message: 'Task non trovata'
+                message: 'Contenuto non trovato'
             });
         }
 
-        // Aggiorna solo i campi forniti
-        const allowedUpdates = ['title', 'description', 'status', 'priority', 'dueDate'];
-        const updateObj = {};
-        
-        allowedUpdates.forEach(field => {
-            if (updates[field] !== undefined) {
-                updateObj[field] = updates[field];
-            }
+        res.json({
+            success: true,
+            data: media
         });
 
-        // Se la task viene completata, aggiungi la data di completamento
-        if (updates.status === 'completed' && task.status !== 'completed') {
-            updateObj.completedAt = new Date();
-        } else if (updates.status !== 'completed') {
-            updateObj.completedAt = null;
+    } catch (error) {
+        console.error('Errore recupero media:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Errore nel recupero del contenuto'
+        });
+    }
+});
+
+// ============================================
+// REVIEWS/RATINGS ROUTES
+// ============================================
+
+// POST /api/media/:tmdbId/reviews - Aggiungi review a un media
+app.post('/api/media/:tmdbId/reviews', authenticateToken, async (req, res) => {
+    try {
+        const { tmdbId } = req.params;
+        const { rating, comment } = req.body;
+
+        if (!rating || rating < 1 || rating > 10) {
+            return res.status(400).json({
+                success: false,
+                message: 'La valutazione deve essere tra 1 e 10'
+            });
         }
 
-        const updatedTask = await Task.findByIdAndUpdate(
-            id,
-            updateObj,
-            { new: true, runValidators: true }
+        const media = await Media.findOne({ tmdbId });
+
+        if (!media) {
+            return res.status(404).json({
+                success: false,
+                message: 'Contenuto non trovato'
+            });
+        }
+
+        // Controlla se l'utente ha già una review per questo media
+        const existingReview = media.reviews.find(review => review.userId.toString() === req.user._id.toString());
+
+        if (existingReview) {
+            // Aggiorna la review esistente
+            existingReview.rating = rating;
+            existingReview.comment = comment || '';
+        } else {
+            // Aggiungi una nuova review
+            media.reviews.push({
+                userId: req.user._id,
+                rating,
+                comment: comment || ''
+            });
+        }
+
+        await media.save();
+
+        res.json({
+            success: true,
+            message: 'Review salvata con successo',
+            data: media
+        });
+
+    } catch (error) {
+        console.error('Errore salvataggio review:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Errore nel salvataggio della review'
+        });
+    }
+});
+
+// GET /api/media/:tmdbId/reviews - Ottieni tutte le review di un media
+app.get('/api/media/:tmdbId/reviews', async (req, res) => {
+    try {
+        const { tmdbId } = req.params;
+
+        const media = await Media.findOne({ tmdbId }).populate('reviews.userId', 'username');
+
+        if (!media) {
+            return res.status(404).json({
+                success: false,
+                message: 'Contenuto non trovato'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: media.reviews
+        });
+
+    } catch (error) {
+        console.error('Errore recupero reviews:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Errore nel recupero delle reviews'
+        });
+    }
+});
+
+// DELETE /api/media/:tmdbId/reviews/:reviewId - Elimina una review
+app.delete('/api/media/:tmdbId/reviews/:reviewId', authenticateToken, async (req, res) => {
+    try {
+        const { tmdbId, reviewId } = req.params;
+
+        const media = await Media.findOne({ tmdbId });
+
+        if (!media) {
+            return res.status(404).json({
+                success: false,
+                message: 'Contenuto non trovato'
+            });
+        }
+
+        const review = media.reviews.id(reviewId);
+
+        if (!review) {
+            return res.status(404).json({
+                success: false,
+                message: 'Review non trovata'
+            });
+        }
+
+        if (review.userId.toString() !== req.user._id.toString()) {
+            return res.status(403).json({
+                success: false,
+                message: 'Non hai il permesso di eliminare questa review'
+            });
+        }
+
+        media.reviews.id(reviewId).remove();
+        await media.save();
+
+        res.json({
+            success: true,
+            message: 'Review eliminata con successo'
+        });
+
+    } catch (error) {
+        console.error('Errore eliminazione review:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Errore nell\'eliminazione della review'
+        });
+    }
+});
+
+// ============================================
+// VIEW STATUS ROUTES (Marcatura visto/da vedere)
+// ============================================
+
+// PUT /api/media/:tmdbId/status - Aggiorna stato visualizzazione (watched/to-watch/none)
+app.put('/api/media/:tmdbId/status', authenticateToken, async (req, res) => {
+    try {
+        const { tmdbId } = req.params;
+        const { status } = req.body;
+
+        if (!['watched', 'to-watch', 'none'].includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Stato non valido. Usa: watched, to-watch, none'
+            });
+        }
+
+        let media = await Media.findOne({ tmdbId });
+
+        if (!media) {
+            return res.status(404).json({
+                success: false,
+                message: 'Contenuto non trovato'
+            });
+        }
+
+        // Cercare o creare entry per questo utente
+        const userStatusIndex = media.userViewStatus.findIndex(
+            u => u.userId.toString() === req.user._id.toString()
+        );
+
+        if (userStatusIndex > -1) {
+            // Aggiorna stato esistente
+            media.userViewStatus[userStatusIndex].status = status;
+            if (status === 'watched') {
+                media.userViewStatus[userStatusIndex].watchedDate = new Date();
+            }
+        } else {
+            // Crea nuovo entry per questo utente
+            media.userViewStatus.push({
+                userId: req.user._id,
+                status: status,
+                watchedDate: status === 'watched' ? new Date() : null
+            });
+        }
+
+        await media.save();
+
+        res.json({
+            success: true,
+            message: `Stato aggiornato a: ${status}`,
+            media: media
+        });
+
+    } catch (error) {
+        console.error('Errore aggiornamento stato:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Errore nell\'aggiornamento dello stato'
+        });
+    }
+});
+
+// GET /api/media/:tmdbId/status - Ottieni stato visualizzazione per utente corrente
+app.get('/api/media/:tmdbId/status', authenticateToken, async (req, res) => {
+    try {
+        const { tmdbId } = req.params;
+
+        const media = await Media.findOne({ tmdbId });
+
+        if (!media) {
+            return res.status(404).json({
+                success: false,
+                message: 'Contenuto non trovato',
+                status: 'none'
+            });
+        }
+
+        const userStatus = media.userViewStatus.find(
+            u => u.userId.toString() === req.user._id.toString()
         );
 
         res.json({
             success: true,
-            message: 'Task aggiornata con successo',
-            data: updatedTask
+            status: userStatus ? userStatus.status : 'none',
+            watchedDate: userStatus ? userStatus.watchedDate : null
         });
 
     } catch (error) {
-        console.error('Errore aggiornamento task:', error);
+        console.error('Errore recupero stato:', error);
         res.status(500).json({
             success: false,
-            message: 'Errore nell\'aggiornamento della task'
+            message: 'Errore nel recupero dello stato'
         });
     }
 });
 
-// DELETE /api/tasks/:id - Elimina una task
-app.delete('/api/tasks/:id', authenticateToken, async (req, res) => {
-    try {
-        const { id } = req.params;
+// ============================================
+// LISTS ROUTES (Gestione liste personali)
+// ============================================
 
-        // Verifica che la task appartenga all'utente
-        const task = await Task.findOne({ _id: id, userId: req.user._id });
-        
-        if (!task) {
-            return res.status(404).json({
+// POST /api/lists - Crea una nuova lista
+app.post('/api/lists', authenticateToken, async (req, res) => {
+    try {
+        const { name, description, type, isPrivate } = req.body;
+
+        if (!name || name.trim().length === 0) {
+            return res.status(400).json({
                 success: false,
-                message: 'Task non trovata'
+                message: 'Il nome della lista è obbligatorio'
             });
         }
 
-        await Task.findByIdAndDelete(id);
+        const list = new List({
+            userId: req.user._id,
+            name: name.trim(),
+            description: description || '',
+            type: type || 'custom',
+            isPrivate: isPrivate || false
+        });
 
-        res.json({
+        await list.save();
+
+        // Aggiungi la lista all'utente
+        await User.findByIdAndUpdate(
+            req.user._id,
+            { $push: { lists: list._id } }
+        );
+
+        res.status(201).json({
             success: true,
-            message: 'Task eliminata con successo'
+            message: 'Lista creata con successo',
+            data: list
         });
 
     } catch (error) {
-        console.error('Errore eliminazione task:', error);
+        console.error('Errore creazione lista:', error);
         res.status(500).json({
             success: false,
-            message: 'Errore nell\'eliminazione della task'
+            message: 'Errore nella creazione della lista'
         });
     }
 });
 
-// GET /api/tasks/stats - Statistiche delle task
-app.get('/api/tasks/stats', authenticateToken, async (req, res) => {
+// GET /api/lists - Ottieni tutte le liste dell'utente
+app.get('/api/lists', authenticateToken, async (req, res) => {
     try {
-        const stats = await Task.getTaskStats(req.user._id);
-        
-        const result = stats[0] || {
-            totalTasks: 0,
-            completedTasks: 0,
-            pendingTasks: 0,
-            highPriorityTasks: 0
-        };
+        const lists = await List.find({ userId: req.user._id }).populate('mediaItems');
 
         res.json({
             success: true,
-            data: result
+            data: lists
         });
 
     } catch (error) {
-        console.error('Errore statistiche task:', error);
+        console.error('Errore recupero liste:', error);
         res.status(500).json({
             success: false,
-            message: 'Errore nel recupero delle statistiche'
+            message: 'Errore nel recupero delle liste'
+        });
+    }
+});
+
+// GET /api/lists/:listId - Ottieni una lista specifica
+app.get('/api/lists/:listId', authenticateToken, async (req, res) => {
+    try {
+        const { listId } = req.params;
+
+        const list = await List.findOne({ _id: listId, userId: req.user._id }).populate('mediaItems');
+
+        if (!list) {
+            return res.status(404).json({
+                success: false,
+                message: 'Lista non trovata'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: list
+        });
+
+    } catch (error) {
+        console.error('Errore recupero lista:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Errore nel recupero della lista'
+        });
+    }
+});
+
+// PUT /api/lists/:listId - Aggiorna una lista
+app.put('/api/lists/:listId', authenticateToken, async (req, res) => {
+    try {
+        const { listId } = req.params;
+        const { name, description, type, isPrivate } = req.body;
+
+        const list = await List.findOne({ _id: listId, userId: req.user._id });
+
+        if (!list) {
+            return res.status(404).json({
+                success: false,
+                message: 'Lista non trovata'
+            });
+        }
+
+        if (name) list.name = name;
+        if (description !== undefined) list.description = description;
+        if (type) list.type = type;
+        if (isPrivate !== undefined) list.isPrivate = isPrivate;
+
+        await list.save();
+
+        res.json({
+            success: true,
+            message: 'Lista aggiornata con successo',
+            data: list
+        });
+
+    } catch (error) {
+        console.error('Errore aggiornamento lista:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Errore nell\'aggiornamento della lista'
+        });
+    }
+});
+
+// DELETE /api/lists/:listId - Elimina una lista
+app.delete('/api/lists/:listId', authenticateToken, async (req, res) => {
+    try {
+        const { listId } = req.params;
+
+        const list = await List.findOne({ _id: listId, userId: req.user._id });
+
+        if (!list) {
+            return res.status(404).json({
+                success: false,
+                message: 'Lista non trovata'
+            });
+        }
+
+        await List.findByIdAndDelete(listId);
+
+        // Rimuovi la lista dall'utente
+        await User.findByIdAndUpdate(
+            req.user._id,
+            { $pull: { lists: listId } }
+        );
+
+        res.json({
+            success: true,
+            message: 'Lista eliminata con successo'
+        });
+
+    } catch (error) {
+        console.error('Errore eliminazione lista:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Errore nell\'eliminazione della lista'
+        });
+    }
+});
+
+// POST /api/lists/:listId/media/:tmdbId - Aggiungi media a una lista
+app.post('/api/lists/:listId/media/:tmdbId', authenticateToken, async (req, res) => {
+    try {
+        const { listId, tmdbId } = req.params;
+
+        const list = await List.findOne({ _id: listId, userId: req.user._id });
+
+        if (!list) {
+            return res.status(404).json({
+                success: false,
+                message: 'Lista non trovata'
+            });
+        }
+
+        const media = await Media.findOne({ tmdbId });
+
+        if (!media) {
+            return res.status(404).json({
+                success: false,
+                message: 'Contenuto non trovato'
+            });
+        }
+
+        // Controlla se il media è già nella lista
+        if (list.mediaItems.includes(media._id)) {
+            return res.status(409).json({
+                success: false,
+                message: 'Questo contenuto è già nella lista'
+            });
+        }
+
+        list.mediaItems.push(media._id);
+        await list.save();
+
+        res.json({
+            success: true,
+            message: 'Contenuto aggiunto alla lista',
+            data: list
+        });
+
+    } catch (error) {
+        console.error('Errore aggiunta media a lista:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Errore nell\'aggiunta del contenuto alla lista'
+        });
+    }
+});
+
+// DELETE /api/lists/:listId/media/:mediaId - Rimuovi media da una lista
+app.delete('/api/lists/:listId/media/:mediaId', authenticateToken, async (req, res) => {
+    try {
+        const { listId, mediaId } = req.params;
+
+        const list = await List.findOne({ _id: listId, userId: req.user._id });
+
+        if (!list) {
+            return res.status(404).json({
+                success: false,
+                message: 'Lista non trovata'
+            });
+        }
+
+        list.mediaItems = list.mediaItems.filter(item => item.toString() !== mediaId);
+        await list.save();
+
+        res.json({
+            success: true,
+            message: 'Contenuto rimosso dalla lista',
+            data: list
+        });
+
+    } catch (error) {
+        console.error('Errore rimozione media da lista:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Errore nella rimozione del contenuto dalla lista'
+        });
+    }
+});
+
+// ============================================
+// FAVORITES ROUTES
+// ============================================
+
+// POST /api/favorites/:tmdbId - Aggiungi ai preferiti
+app.post('/api/favorites/:tmdbId', authenticateToken, async (req, res) => {
+    try {
+        const { tmdbId } = req.params;
+
+        const media = await Media.findOne({ tmdbId });
+
+        if (!media) {
+            return res.status(404).json({
+                success: false,
+                message: 'Contenuto non trovato'
+            });
+        }
+
+        const user = await User.findById(req.user._id);
+
+        if (user.favoriteMedia.includes(media._id)) {
+            return res.status(409).json({
+                success: false,
+                message: 'Questo contenuto è già nei preferiti'
+            });
+        }
+
+        user.favoriteMedia.push(media._id);
+        await user.save();
+
+        res.json({
+            success: true,
+            message: 'Contenuto aggiunto ai preferiti'
+        });
+
+    } catch (error) {
+        console.error('Errore aggiunta preferiti:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Errore nell\'aggiunta ai preferiti'
+        });
+    }
+});
+
+// DELETE /api/favorites/:mediaId - Rimuovi dai preferiti
+app.delete('/api/favorites/:mediaId', authenticateToken, async (req, res) => {
+    try {
+        const { mediaId } = req.params;
+
+        const user = await User.findByIdAndUpdate(
+            req.user._id,
+            { $pull: { favoriteMedia: mediaId } },
+            { new: true }
+        );
+
+        res.json({
+            success: true,
+            message: 'Contenuto rimosso dai preferiti'
+        });
+
+    } catch (error) {
+        console.error('Errore rimozione preferiti:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Errore nella rimozione dai preferiti'
+        });
+    }
+});
+
+// GET /api/favorites - Ottieni preferiti dell'utente
+app.get('/api/favorites', authenticateToken, async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id).populate('favoriteMedia');
+
+        res.json({
+            success: true,
+            data: user.favoriteMedia
+        });
+
+    } catch (error) {
+        console.error('Errore recupero preferiti:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Errore nel recupero dei preferiti'
         });
     }
 });
@@ -467,11 +992,11 @@ app.use((err, req, res, next) => {
 
 // Avvio del server
 app.listen(PORT, () => {
-    console.log(`🚀 Server Todo avviato su http://localhost:${PORT}`);
-    console.log(`📝 Apri il browser e vai su http://localhost:${PORT} per il login`);
-    console.log(`🗄️  Database: mongodb://localhost:27017/Verifica`);
+    console.log(`🚀 Server TMDb avviato su http://localhost:${PORT}`);
+    console.log(`🎬 API TMDb integrata`);
+    console.log(`🔑 API Key: ${process.env.API_KEY ? 'Configurata' : 'Non configurata'}`);
+    console.log(`🗄️  Database: mongodb://localhost:27017/TMDB`);
     console.log(`🔐 JWT Secret configurato: ${process.env.JWT_SECRET ? 'Sì' : 'No'}`);
-    console.log('📝 Credenziali test: admin / admin123');
 });
 
 module.exports = app;
